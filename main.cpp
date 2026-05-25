@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -585,30 +586,37 @@ int main(int argc, char** argv) {
     std::cout << "Loaded " << input.width << "x" << input.height << " ("
               << input.pixels.size() / (1024.0 * 1024.0) << " MB)\n";
 
+    namespace fs = std::filesystem;
+    const fs::path input_stem = fs::path(input_path).stem();
+    const fs::path out_dir = fs::path("output") / input_stem;
+    fs::create_directories(out_dir);
+
     OpenClContext cl_ctx = InitOpenCl();
 
     auto bench = [&](const std::string& filter_name, const std::string& backend,
                      auto&& fn, const std::string& save_as = "") {
       const double avg = MeasureMilliseconds(fn, repeats);
-      if (!save_as.empty()) SavePng(save_as, fn());
+      if (!save_as.empty()) SavePng((out_dir / save_as).string(), fn());
       return BenchmarkRow{filter_name, backend, avg};
     };
 
     std::vector<BenchmarkRow> rows;
-    rows.push_back(bench("Inversion", "Sequential", [&] { return InvertSequential(input); }, "out_inv_seq.png"));
+    rows.push_back(bench("Inversion", "Sequential", [&] { return InvertSequential(input); }, "inversion.png"));
     rows.push_back(bench("Inversion", "OpenMP",     [&] { return InvertOpenMp(input); }));
     rows.push_back(bench("Inversion", "SIMD",       [&] { return InvertSimd(input); }));
     rows.push_back(bench("Inversion", "OpenCL",     [&] { return InvertOpenCl(cl_ctx, input); }));
 
-    rows.push_back(bench("Median 3x3", "Sequential", [&] { return MedianSequential(input); }, "out_med_seq.png"));
+    rows.push_back(bench("Median 3x3", "Sequential", [&] { return MedianSequential(input); }, "median.png"));
     rows.push_back(bench("Median 3x3", "OpenMP",     [&] { return MedianOpenMp(input); }));
     rows.push_back(bench("Median 3x3", "SIMD",       [&] { return MedianSimd(input); }));
     rows.push_back(bench("Median 3x3", "OpenCL",     [&] { return RunOpenCl2d(cl_ctx, cl_ctx.median_kernel, input); }));
 
-    rows.push_back(bench("Sobel Edges", "Sequential", [&] { return EdgeSequential(input); }, "out_edge_seq.png"));
+    rows.push_back(bench("Sobel Edges", "Sequential", [&] { return EdgeSequential(input); }, "edges.png"));
     rows.push_back(bench("Sobel Edges", "OpenMP",     [&] { return EdgeOpenMp(input); }));
     rows.push_back(bench("Sobel Edges", "SIMD",       [&] { return EdgeSimd(input); }));
     rows.push_back(bench("Sobel Edges", "OpenCL",     [&] { return RunOpenCl2d(cl_ctx, cl_ctx.sobel_kernel, input); }));
+
+    std::cout << "Saved results to " << out_dir.string() << "/\n";
 
     PrintTable(rows);
     std::FILE* csv = std::fopen("results.csv", "a");
